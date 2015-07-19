@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: UTF-8 -*-
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:
 
@@ -8,6 +7,7 @@ import sys
 from webbrowser import _iscommand as is_command
 import gtk
 import mimetypes, mimetools
+import urllib
 
 import config
 import locale
@@ -38,7 +38,7 @@ def open_webbrowser(uri):
         browser = 'start'
     subprocess.Popen([browser, uri])
 
-def webkit_set_proxy_uri(scheme, host, port, user = None, passwd = None):
+def webkit_set_proxy_uri(scheme = None, host = None, port = None, user = None, passwd = None):
     from ctypes import CDLL, c_void_p, c_char_p, c_int
     try:
         if os.name == 'nt':
@@ -65,11 +65,21 @@ def webkit_set_proxy_uri(scheme, host, port, user = None, passwd = None):
         g_object_set(session, "max-conns", 20, None)
         g_object_set(session, "max-conns-per-host", 5, None)
 
-        if host:
+        if not scheme:
+            return 1
+        elif ":" in scheme:
             soup_uri_new = libsoup.soup_uri_new
             soup_uri_new.restype = c_void_p
             soup_uri_new.argtypes = [ c_char_p ]
-            proxy_uri = soup_uri_new(None)
+            proxy_uri = soup_uri_new(str(scheme))
+            
+            g_object_set.argtypes = [ c_void_p, c_char_p, c_void_p, c_void_p ]
+            g_object_set(session, "proxy-uri", proxy_uri, None)
+        elif host:
+            soup_uri_new = libsoup.soup_uri_new
+            soup_uri_new.restype = c_void_p
+            soup_uri_new.argtypes = [ c_char_p ]
+            proxy_uri = soup_uri_new("http://127.0.0.1")
             if proxy_uri == 0:
                 return 1
 
@@ -95,10 +105,6 @@ def webkit_set_proxy_uri(scheme, host, port, user = None, passwd = None):
 
             g_object_set.argtypes = [ c_void_p, c_char_p, c_void_p, c_void_p ]
             g_object_set(session, "proxy-uri", proxy_uri, None)
-
-            soup_uri_free = libsoup.soup_uri_free
-            soup_uri_free.argtypes = [ c_void_p ]
-            soup_uri_free(proxy_uri)
         return 0
     except:
         exctype, value = sys.exc_info()[:2]
@@ -126,7 +132,7 @@ def encode_multipart_formdata(fields, files):
     total_size = 0
     L = []
     for key, value in fields.items():
-        key, value = key.encode('utf8'), value.encode('utf8')
+        key, value = str(key).encode('utf8'), str(value).encode('utf8')
         L.append('--' + BOUNDARY)
         L.append('Content-Disposition: form-data; name="%s"' % key)
         L.append('')
@@ -201,3 +207,16 @@ def get_locale():
     if lang in supported_locate:
         return supported_locate[lang]
     return 'en'
+
+def get_file_path_from_dnd_dropped_uri(uri):
+    path = ""
+    if uri.startswith('file:\\\\\\'): # windows
+        path = uri[8:] # 8 is len('file:///')
+    elif uri.startswith('file://'): # nautilus, rox
+        path = uri[7:] # 7 is len('file://')
+    elif uri.startswith('file:'): # xffm
+        path = uri[5:] # 5 is len('file:')
+    path = urllib.url2pathname(path) # escape special chars
+    path = path.strip('\r\n\x00') # remove \r\n and NULL
+
+    return path

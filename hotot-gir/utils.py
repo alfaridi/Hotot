@@ -1,13 +1,12 @@
-#!/usr/bin/python
 # -*- coding: UTF-8 -*-
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:
 
 import subprocess
 import os
 import sys
-from webbrowser import _iscommand as is_command
 from gi.repository import Gtk, Gdk, GLib, WebKit, Soup;
 import mimetypes, mimetools
+import re
 
 import config
 import locale
@@ -26,6 +25,12 @@ supported_locate = {
 
 _browser = ''
 
+def looseVersion(vstring):
+    '''reconstruct the version string
+    '''
+    component_re = re.compile(r'(\d+ | [a-z]+ | \.)', re.VERBOSE)
+    return [ (int(i) if i.isdigit() else i) for i in component_re.split(vstring) if i and i != '.' ]
+
 def open_webbrowser(uri):
     '''open a URI in the registered default application
     '''
@@ -38,14 +43,23 @@ def open_webbrowser(uri):
         browser = 'start'
     subprocess.Popen([browser, uri])
 
-def webkit_set_proxy_uri(scheme, host, port, user = None, passwd = None):
+def webkit_set_proxy_uri(scheme = None, host = None, port = None, user = None, passwd = None):
     try:
         session = WebKit.get_default_session()
-        session.set_property("max-conns", 20)
-        session.set_property("max-conns-per-host", 5)
-
-        if host:
-            proxy_uri = Soup.URI()
+        if looseVersion(Soup._version) < looseVersion('2.4'):
+            session.set_property("max-conns", 3)
+            session.set_property("max-conns-per-host", 1)
+        else:
+            session.set_property("max-conns", 10)
+            session.set_property("max-conns-per-host", 5)
+        session.set_property("timeout", 10)
+        
+        if scheme == None:
+            return True
+        elif ":" in scheme:
+            proxy_uri = Soup.URI.new(str(scheme))
+        elif host:
+            proxy_uri = Soup.URI.new("http://127.0.0.1")
             proxy_uri.set_scheme(str(scheme))
             proxy_uri.set_host(str(host))
             if port:
@@ -55,7 +69,7 @@ def webkit_set_proxy_uri(scheme, host, port, user = None, passwd = None):
             if passwd:
                 proxy_uri.set_password(str(passwd))
 
-            session.set_property("proxy-uri", proxy_uri)
+        session.set_property("proxy-uri", proxy_uri)
         return True
     except:
         exctype, value = sys.exc_info()[:2]
@@ -73,7 +87,6 @@ def open_file_chooser_dialog():
     if resp == Gtk.ResponseType.OK:
         sel_file =  fc_dlg.get_filename()
     fc_dlg.destroy()
-    Gdk.threads_leave()
     return sel_file
 
 def encode_multipart_formdata(fields, files):
@@ -83,7 +96,7 @@ def encode_multipart_formdata(fields, files):
     total_size = 0
     L = []
     for key, value in fields.items():
-        key, value = key.encode('utf8'), value.encode('utf8')
+        key, value = str(key).encode('utf8'), str(value).encode('utf8')
         L.append('--' + BOUNDARY)
         L.append('Content-Disposition: form-data; name="%s"' % key)
         L.append('')
@@ -110,7 +123,7 @@ def get_content_type(filename):
     return mimetypes.guess_type(filename)[0] or 'application/octet-stream'
 
 def get_ui_object(name):
-    for base in config.DATA_DIRS:
+    for base in config.get_path("data"):
         fullpath = os.path.join(base, name)
         if os.path.exists(fullpath):
             return fullpath
@@ -118,7 +131,7 @@ def get_ui_object(name):
 def get_extra_exts():
     import glob
     exts = []
-    files = glob.glob(os.path.join(config.CONF_DIR, config.EXT_DIR_NAME) + '/*')
+    files = glob.glob(config.get_path("ext") + '/*')
     ext_dirs = filter(lambda x: os.path.isdir(x), files)
     for dir in ext_dirs:
         ext_js = os.path.join(dir, 'entry.js')
@@ -129,7 +142,7 @@ def get_extra_exts():
 def get_extra_themes():
     import glob
     themes = []
-    files = glob.glob(os.path.join(config.CONF_DIR, config.THEME_DIR_NAME) + '/*')
+    files = glob.glob(config.get_path("theme") + '/*')
     theme_dirs = filter(lambda x: os.path.isdir(x), files)
     for dir in theme_dirs:
         info_file = os.path.join(dir, 'info.json')
@@ -158,3 +171,16 @@ def get_locale():
     if lang in supported_locate:
         return supported_locate[lang]
     return 'en'
+
+def get_file_path_from_dnd_dropped_uri(uri):
+    path = ""
+    if uri.startswith('file:\\\\\\'): # windows
+        path = uri[8:] # 8 is len('file:///')
+    elif uri.startswith('file://'): # nautilus, rox
+        path = uri[7:] # 7 is len('file://')
+    elif uri.startswith('file:'): # xffm
+        path = uri[5:] # 5 is len('file:')
+    path = urllib.url2pathname(path) # escape special chars
+    path = path.strip('\r\n\x00') # remove \r\n and NULL
+
+    return path

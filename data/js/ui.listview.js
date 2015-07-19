@@ -9,7 +9,7 @@ function init() {
 init_view:
 function init_view(view) {
     var vcard = view._header.find('.list_vcard');
-    var vcard_profile_btns = vcard.find('.radio_group_btn');
+    var vcard_profile_btns=vcard.find('.mochi_button_group_item');
     vcard_profile_btns.click(function (event) {
         var pagename = '.' + $(this).attr('href').substring(1);
         vcard_profile_btns.removeClass('selected');
@@ -18,7 +18,7 @@ function init_view(view) {
         vcard.find(pagename).show();
     });
     var toggle = view._header.find('.list_view_toggle');
-    var sub_view_btns = toggle.find('.radio_group_btn');
+    var sub_view_btns = toggle.find('.mochi_button_group_item');
     sub_view_btns.click(function (event) {
         var pagename = $(this).attr('href').substring(1);
         sub_view_btns.removeClass('selected');
@@ -30,25 +30,25 @@ function init_view(view) {
         var _this = this;
         if ($(this).hasClass('unfo')) {
             toast.set("Unfollow @" + view.screen_name + " ...").show();
-            lib.twitterapi.destroy_list_subscriber(view.screen_name
+            globals.twitterClient.destroy_list_subscriber(view.screen_name
                 , view.slug, function () {
                 toast.set(
                     "Unfollow @"+ view.screen_name + '/' + view.slug + " Successfully!").show();
-                $(_this).text('Follow').removeClass('unfo');
+                $(_this).text(_('follow')).removeClass('unfo').addClass('blue');
             });
         } else {
             toast.set("Follow @" + view.screen_name + " ...").show();
-            lib.twitterapi.create_list_subscriber(view.screen_name
+            globals.twitterClient.create_list_subscriber(view.screen_name
                 , view.slug, function () {
                 toast.set(
                     "Follow @"+ view.screen_name +'/' + view.slug+" Successfully!").show();
-                $(_this).text('Unfollow').addClass('unfo');
+                $(_this).text(_('unfollow')).addClass('unfo').removeClass('blue');
             });
         }
     });
 
     vcard.find('.vcard_edit').click(function () {
-        ui.ListAttrDlg.load(view.screen_name, view.slug, '', 'private');
+        ui.ListAttrDlg.load(view.screen_name, view.slug);
         globals.list_attr_dialog.open();
         return false;
     });
@@ -57,13 +57,21 @@ function init_view(view) {
         var ans = confirm('Are you sure you want to delete this list?');
         if (ans) {
             toast.set("Delete List @" + view.screen_name + '/' + view.slug + " ...").show();
-            lib.twitterapi.destroy_list(view.screen_name, view.slug
+            globals.twitterClient.destroy_list(view.screen_name, view.slug
             , function () {
                 toast.set("Delete List @" + view.screen_name + '/' + view.slug + " Successfully!").show();
                 ui.Slider.remove(view.name);
             });
         }
         return false;
+    });
+
+    view._header.find('.expand').click(function () {
+        if (vcard.is(':hidden')) {
+            vcard.slideDown('fast');
+        } else {
+            vcard.slideUp('fast');
+        }
     });
 },
     
@@ -73,6 +81,7 @@ function destroy_view(view) {
     var vcard = view._header.find('.list_vcard');
     vcard.find('.button').unbind();
     vcard.find('.radio_group_btn').unbind();
+    view._header.find('expand').unbind();
     // remove slide, view and DOM
     ui.Slider.remove(view.name);
 },
@@ -85,7 +94,7 @@ function switch_sub_view(view, name) {
         view.item_type = 'id';
         view.since_id = 1;
         view.former = ui.Template.form_tweet;
-        view._load = ui.ListView.load_timeline;
+        view._load = ui.ListView.load_timeline_full;
         view._loadmore = ui.ListView.loadmore_timeline;
         view._load_success = ui.Main.load_tweet_success;
         view._loadmore_success = ui.Main.loadmore_tweet_success;
@@ -117,7 +126,7 @@ function switch_sub_view(view, name) {
 },
 
 render_list_view:
-function render_list_view(view) {
+function render_list_view(view, list_obj, proc) {
     var btn_follow = view._header.find('.vcard_follow');
     var btn_edit = view._header.find('.vcard_edit');
     var btn_delete = view._header.find('.vcard_delete');
@@ -131,45 +140,61 @@ function render_list_view(view) {
         btn_edit.hide();
         btn_delete.hide();
     }
-    ui.Slider.set_icon(view.name, lib.twitterapi.get_user_profile_image(view.screen_name, 'normal'), ui.Slider.FLOAT_ICON);
-    ui.Template.fill_list_vcard(view);
+    ui.Slider.set_icon(view.name, globals.twitterClient.get_user_profile_image(view.screen_name, 'normal'), ui.Slider.FLOAT_ICON);
+    ui.Slider.set_icon_alt(view.name, 'image/ic_list.png');
+    ui.Template.fill_list_vcard(view, list_obj);
+    // @TODO relationship
+    proc();
+},
+
+load_timeline_full:
+function load_timeline_full(view, success, fail) {
+    var render_proc = function (list_obj) {
+        ui.ListView.render_list_view(view, list_obj, 
+        function () {
+            view._load = ui.ListView.load_timeline;
+            view.load();
+        });
+    }
+    globals.twitterClient.show_list(view.screen_name, view.slug, render_proc,
+        function (xhr, textStatus, errorThrown) {
+            if (xhr.status == 404) {
+                widget.DialogManager.alert('This person does not exist.'
+                    , 'The person @' + view.screen_name + ' you are looking for does not exist. He/she may have deleted the account or changed the user name.');
+                view.destroy();
+            }
+    });
+
 },
 
 load_timeline:
 function load_timeline(view, success, fail) {
-    ui.ListView.render_list_view(view);
-    lib.twitterapi.get_list_statuses(view.screen_name, view.slug, 1, null, success, function (xhr, textStatus, errorThrown) {
-            if (xhr.status == 404) {
-                widget.DialogManager.alert('This list does not exist.'
-                    , 'The list @' + view.screen_name + '/' +view.slug+' you are looking for does not exist.');
-                view.destroy();
-            }
-    });
+    globals.twitterClient.get_list_statuses(view.screen_name, view.slug, 1, null, success);
 },
 
 loadmore_timeline:
 function loadmore_people(view, success, fail) {
-    lib.twitterapi.get_list_statuses(view.screen_name, view.slug, 1, view.max_id, success);
+    globals.twitterClient.get_list_statuses(view.screen_name, view.slug, 1, view.max_id, success);
 },
 
 load_follower:
 function load_follower(view, success, fail) {
-    lib.twitterapi.get_list_subscribers(view.screen_name, view.slug, -1, success);
+    globals.twitterClient.get_list_subscribers(view.screen_name, view.slug, -1, success);
 },
 
 loadmore_follower:
 function loadmore_follower(view, success, fail) {
-    lib.twitterapi.get_list_subscribers(view.screen_name, view.slug, view.cursor, success);
+    globals.twitterClient.get_list_subscribers(view.screen_name, view.slug, view.cursor, success);
 },
 
 load_following:
 function load_following(view, success, fail) {
-    lib.twitterapi.get_list_members(view.screen_name, view.slug, -1, success);
+    globals.twitterClient.get_list_members(view.screen_name, view.slug, -1, success);
 },
 
 loadmore_following:
 function loadmore_following(view, success, fail) {
-    lib.twitterapi.get_list_members(view.screen_name, view.slug, view.cursor, success);
-},
+    globals.twitterClient.get_list_members(view.screen_name, view.slug, view.cursor, success);
+}
 
 };

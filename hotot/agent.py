@@ -1,18 +1,19 @@
-#!/usr/bin/env python
-# -*- coding:utf8 -*-
+# -*- coding: UTF-8 -*-
+# vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:
 import json
 import config
 import time
 import base64
 import urllib, urllib2
 import gtk
-import threading 
+import threading
 import gobject
 import utils
 import hotot
 import os
 import sys
 import subprocess
+import hashlib
 
 try: import i18n
 except: from gettext import gettext as _
@@ -32,7 +33,7 @@ if USE_GTKNOTIFICATION_IN_NATIVE_PLATFORM:
     import gtknotification
     class  Notification(object):
         def do_notify(self, summary, body, icon_file = None):
-            if (icon_file == None or not os.path.isfile(icon_file)):
+            if (icon_file == None or not os.path.isfile(icon_file) or os.path.getsize(icon_file) == 0):
                 icon_file = utils.get_ui_object(os.path.join('image','ic64_hotot.png'));
             icon_file = 'file://' + icon_file
             title = _("Hotot Notification")
@@ -46,7 +47,7 @@ else:
     pynotify.init(_("Hotot Notification"))
     notify = pynotify.Notification('Init', '')
 
-webv = None 
+webv = None
 app = None
 http_code_msg_table = {
       404: 'The URL you request does not exist. Please check your API Base/OAuth Base/Search Base.'
@@ -68,9 +69,9 @@ def do_notify(summary, body, icon_file = None):
     if USE_GTKNOTIFICATION_IN_NATIVE_PLATFORM:
         return notify.do_notify(summary, body, icon_file)
     n = pynotify.Notification(summary, body)
-    if (icon_file == None or not os.path.isfile(icon_file)):
+    if (icon_file == None or not os.path.isfile(icon_file) or os.path.getsize(icon_file) == 0):
         icon_file = utils.get_ui_object(os.path.join('image','ic64_hotot.png'));
-    n.set_icon_from_pixbuf(gtk.gdk.pixbuf_new_from_file(icon_file))    
+    n.set_icon_from_pixbuf(gtk.gdk.pixbuf_new_from_file(icon_file))
     n.set_timeout(5000)
     n.show()
 
@@ -102,12 +103,10 @@ def crack_action(params):
         img_uri = urllib.unquote(params[2])
         avatar_file = urllib.unquote(params[3])
         avatar_path = os.path.join(config.AVATAR_CACHE_DIR, avatar_file)
-        if not (os.path.exists(avatar_path) and avatar_file.endswith(img_uri[img_uri.rfind('/')+1:])):
-            print 'Download:', img_uri , 'To' , avatar_path
-            th = threading.Thread(
-                target = save_file_proc, 
-                args=(img_uri, avatar_path))
-            th.start()
+        th = threading.Thread(
+            target = save_file_proc,
+            args=(img_uri, avatar_path))
+        th.start()
     elif params[1] == 'log':
         print '\033[1;31;40m[%s]\033[0m %s' % (urllib.unquote(params[2]) ,urllib.unquote(params[3]))
     elif params[1] == 'paste_clipboard_text':
@@ -125,7 +124,13 @@ def crack_system(params):
         body = urllib.unquote(params[4])
         if type == 'content':
             try:
-                avatar_file = os.path.join(config.AVATAR_CACHE_DIR, urllib.unquote(params[5]))
+                img_uri = urllib.unquote(params[5])
+                avatar_file = os.path.join(config.AVATAR_CACHE_DIR, hashlib.new("sha1", img_uri).hexdigest())
+                avatar_path = avatar_file
+                th = threading.Thread(
+                    target = save_file_proc,
+                    args=(img_uri, avatar_path))
+                th.start()
             except:
                 avatar_file = None
             do_notify(summary, body, avatar_file)
@@ -136,7 +141,8 @@ def crack_system(params):
         unread_count = int(urllib.unquote(params[2]))
         app.unread_alert("unread", "Unread", "Items", unread_count)
     elif params[1] == 'incoming':
-        app.emit_incoming(params[2], urllib.unquote(params[3]))
+        # @TODO
+        pass
     elif params[1] == 'load_settings':
         settings = json.loads(urllib.unquote(params[2]))
         config.load_settings(settings)
@@ -159,16 +165,18 @@ def crack_request(req_params):
     th.start()
 
 def save_file_proc(uri, save_path):
-    if (not os.path.isfile(save_path)):
+    if (not os.path.isfile(save_path)) or os.path.getsize(save_path) == 0:
         try:
+            data = _get(uri)
             avatar = open(save_path, "wb")
-            avatar.write(_get(uri, req_timeout=5))
+            avatar.write(data)
             avatar.close()
         except:
             import traceback
             print "Exception:"
             traceback.print_exc(file=sys.stdout)
-            os.unlink(save_path)
+            if os.path.isfile(save_path):
+                os.unlink(save_path)
 
 
 def execute_script(scripts):
@@ -191,7 +199,7 @@ def set_style_scheme():
     style = app.window.get_style()
     base, fg, bg, text = style.base, style.fg, style.bg, style.text
     webv.execute_script('''
-        $('#header').css('background', '%s');    
+        $('#header').css('background', '%s');
     ''' % str(bg[gtk.STATE_NORMAL]));
 
 def get_prefs(name):
@@ -200,6 +208,15 @@ def get_prefs(name):
 def set_prefs(name, value):
     config.settings[name] = value
 
+def _encoding_workaround(func):
+    def wrap(*args, **argkw):
+        sys.setdefaultencoding('iso8859-1')
+        result = func(*args, **argkw)
+        sys.setdefaultencoding('utf8')
+        return result
+    return wrap
+
+@_encoding_workaround
 def request(uuid, method, url, params={}, headers={},files=[],additions=''):
     scripts = ''
     try:
@@ -215,45 +232,60 @@ def request(uuid, method, url, params={}, headers={},files=[],additions=''):
         content = '<p>%s</p><h3>- Technological Info -</h3><div class="dlg_group"><pre>%s</pre></div>' % (msg, tech_info)
         scripts = '''
             widget.DialogManager.alert('%s', '%s');
-            lib.network.error_task_table['%s']('');
+            globals.network.error_task_table['%s']('');
             ''' % ('Ooops, an Error occurred!', content, uuid);
     except urllib2.URLError, e:
         content = '<p><label>Error Code:</label>%s<br/><label>Reason:</label> %s, %s<br/></p>' % (e.errno, e.reason, e.strerror)
         scripts = '''
             widget.DialogManager.alert('%s', '%s');
-            lib.network.error_task_table['%s']('');
+            globals.network.error_task_table['%s']('');
             ''' % ('Ooops, an Error occurred!', content, uuid);
     else:
         if uuid != None:
             if result[0] != '{' and result[0] != '[':
-                scripts = '''lib.network.success_task_table['%s']('%s');
+                scripts = '''globals.network.success_task_table['%s']('%s');
                 ''' % (uuid, result)
             else:
-                scripts = '''lib.network.success_task_table['%s'](%s);
+                scripts = '''globals.network.success_task_table['%s'](%s);
                 ''' % (uuid, result)
-    scripts += '''delete lib.network.success_task_table['%s'];
-    delete lib.network.error_task_table['%s'];
+    scripts += '''delete globals.network.success_task_table['%s'];
+    delete globals.network.error_task_table['%s'];
     '''  % (uuid, uuid);
     gobject.idle_add(webv.execute_script, scripts)
 
 def get_urlopen():
-    if not get_prefs('use_http_proxy'):
-        return urllib2.urlopen
-    
-    scheme = 'https'
-    host = str(get_prefs('http_proxy_host'))
-    port = str(get_prefs('http_proxy_port'))
-    url = scheme + '://' + host + ':' + port
-    if get_prefs('use_http_proxy_auth'):
-        proxy_support = urllib2.ProxyHandler({ 'http': url, 'https': url })
-        username = str(get_prefs('http_proxy_name'))
-        password = str(get_prefs('http_proxy_password'))
-        auth_handler = urllib2.ProxyBasicAuthHandler()
-        auth_handler.add_password(None, url, username, password)
-        return urllib2.build_opener(proxy_support, auth_handler).open
+    proxy_type = get_prefs('proxy_type')
+    if proxy_type == 'http':
+        scheme = 'http'
+        host = str(get_prefs('proxy_host'))
+        port = str(get_prefs('proxy_port'))
+        url = scheme + '://' + host + ':' + port
+        if get_prefs('proxy_auth'):
+            proxy_support = urllib2.ProxyHandler({ 'http': url, 'https': url })
+            username = str(get_prefs('proxy_auth_name'))
+            password = str(get_prefs('proxy_auth_password'))
+            auth_handler = urllib2.ProxyBasicAuthHandler()
+            auth_handler.add_password(None, url, username, password)
+            return urllib2.build_opener(proxy_support, auth_handler).open
+        else:
+            proxy_support = urllib2.ProxyHandler({ 'http': url, 'https': url })
+            return urllib2.build_opener(proxy_support).open
+    elif proxy_type == 'system':
+        if 'http_proxy' in os.environ and os.environ["http_proxy"]:
+            url = os.environ["http_proxy"]
+        elif 'HTTP_PROXY' in os.environ and os.environ["HTTP_PROXY"]:
+            url = os.environ["HTTP_PROXY"]
+        else:
+            url = None
+
+        if not url:
+            return urllib2.urlopen
+        else:
+            proxy_support = urllib2.ProxyHandler({ 'http': url, 'https': url })
+            return urllib2.build_opener(proxy_support).open
     else:
-        proxy_support = urllib2.ProxyHandler({ 'http': url, 'https': url })
-        return urllib2.build_opener(proxy_support).open
+        return urllib2.urlopen
+
 
 def _get(url, params={}, req_headers={}, req_timeout=None):
     urlopen = get_urlopen()
@@ -270,10 +302,10 @@ def _post(url, params={}, req_headers={}, files=[], additions='', req_timeout=No
 
     urlopen = get_urlopen()
     params = dict([(k.encode('utf8')
-            , v.encode('utf8') if type(v)==unicode else v) 
+            , v.encode('utf8') if type(v)==unicode else v)
                 for k, v in params.items()])
 
-    request = urllib2.Request(url, 
+    request = urllib2.Request(url,
         urlencode(params) + additions, headers=req_headers);
     ret = urlopen(request, timeout=req_timeout).read()
     return ret
@@ -325,7 +357,7 @@ def _curl(url, params=None, post=False, username=None, password=None, header=Non
     try:
         curl.perform()
     except pycurl.error, e:
-        raise e    
+        raise e
 
     http_code = curl.getinfo(pycurl.HTTP_CODE)
     if http_code != 200:
@@ -343,6 +375,6 @@ def urlencode(query):
             del query[k]
     return urllib.urlencode(query)
 
-def idle_it(fn): 
+def idle_it(fn):
     return lambda *args: gobject.idle_add(fn, *args)
 

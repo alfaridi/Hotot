@@ -11,6 +11,9 @@ function WidgetDialog(obj) {
 
     var self = this;
     self._me = null;
+    self.BAR_H = 38;
+    self._auto_h = false;
+    self._auto_w = false;
 
     self._default_dialog_html = '<div id="{%ID%}" class="dialog"><div class="dialog_bar"><h1 class="dialog_title">Title</h1><a href="javascript: void(0);" class="dialog_close_btn"></a></div><div class="dialog_container"><div class="dialog_header"></div><div class="dialog_body"></div><div class="dialog_footer"></div></div></div>'
 
@@ -63,20 +66,22 @@ function WidgetDialog(obj) {
                 self._offsetY = event.clientY - pos.top;
                 event.target.style.cursor = "move";
 
-                $('body').css('-webkit-user-select', 'none');
+                $('body').css({'-webkit-user-select': 'none',
+                    '-khtml-user-select': 'none'});
             })
             .mouseup(function (event) {
-                 if (self._drag) {
-                     self._drag = false;
-                     event.target.style.cursor = null;
-                     $('body').css('-khtml-user-select', '');
-                 }
+                if (self._drag) {
+                    self._drag = false;
+                    event.target.style.cursor = null;
+                    $('body').css({'-webkit-user-select': '',
+                        '-khtml-user-select': ''});
+                }
              });
              $(document).mousemove(function (event) {
                  if (self._drag) {
                      self.move(event.clientX - self._offsetX, event.clientY - self._offsetY);
                  }
-             })
+             });
     };
 
     self.move = function move(x, y) {
@@ -93,64 +98,81 @@ function WidgetDialog(obj) {
         self._footer_h = parseInt(self._footer.css('height')) 
             + parseInt(self._footer.css('padding-top'))
             + parseInt(self._footer.css('padding-bottom'))+1;
-        self._me_w = (w == -1? self._me_w: w);
         self._me_h = (h == -1? self._me_h: h);
-        self._me.css({'width': self._me_w, 'height': self._me_h}); 
-        var body_h = self._me_h - self._header_h - self._footer_h;
-        var body_padding = parseInt(self._body.css('padding-top'))
-            + parseInt(self._body.css('padding-bottom'));
-        self._body.css({'height': (body_h - body_padding - 30) + 'px'});
+        if (h !== 'auto' && !self._auto_h) {
+            self._me.css({'height': self._me_h}); 
+            var body_h = self._me_h - self._header_h - self._footer_h;
+            var body_padding = parseInt(self._body.css('padding-top'))
+                + parseInt(self._body.css('padding-bottom'));
+            self._body.css({'height': (body_h - body_padding - self.BAR_H) + 'px'});
+        } else {
+            self._auto_h = true;
+        }
+        if (w !== 'auto' && !self._auto_w) {
+            self._me_w = (w == -1? self._me_w: w);
+            self._me.css({'width': self._me_w}); 
+        } else {
+            self._auto_w = true;
+        }
         // 20px = dialog_body.padding + border_num
     };
 
-    self.place = function place(where) {
-        var x = 0;
-        var y = 0;
-        switch (where){
-        case widget.DialogManager.CENTER:
-            x = $(window).width()/2 - self._me_w / 2;
-            y = $(window).height()/2 - self._me_h/2;
-        break;
-        case widget.DialogManager.LEFT_TOP:
-            x = 0;
-            y = 0;
-        break;
-        case widget.DialogManager.TOP:
-            x = 0;
-            y = $(window).height()/2 - self._me_h/2;
-        break;
-        default:
-        break;
+    self.callUp = function callUp(method) {
+        var x = $(window).width()/2 - self._me.width() / 2;
+        var y = $(window).height()/2 - self._me.height() / 2;
+        y = y > 100 ? y - y/2.0: y;
+        if (method == "off") {
+            self.move(x, y);
+            self._me.show();
+        } else if (method == 'slide') {
+            self._me.show();
+            self.move(x, $(window).height() + 10);
+            self._me.transition({'left': x, 'top': y}, 
+                200);
+        } else {
+            self.move(x, y);
+            self._me.fadeIn('fast');
         }
-        self.move(x, y);
     };
 
-    self.relocate = function relocate() {
-        self.place(widget.DialogManager.CENTER);
+    self.dissipate = function dissipate(method) {
+        var clearUp = function () {
+            if (self.destroy_on_close) {
+                self.destroy();
+            } else {
+                self._me.hide();
+            }
+        }
+        if (method == 'off') {
+            clearUp();
+        } else if (method == "slide") {
+            var x = $(window).width()/2 - self._me.width() / 2;
+            var y = 0 - self._me.height() - 100;
+            self._me.transition({'left': x, 'top': y}, 
+                200, clearUp
+            );
+        } else {
+            self._me.fadeOut('fast', clearUp);
+        }
     };
 
-    self.open = function open(with_mask) {
-        if (with_mask) {
-            $('#dialog_mask').show();
-        }
+    self.open = function open(method, callback) {
         if ($(window).width() < self._me_w + 20) {
             self.resize($(window).width() - 20, -1);
         }
         if ($(window).height() < self._me_h + 20) {
             self.resize(-1, $(window).height() - 20);
         }
-        self.place(widget.DialogManager.CENTER);
+        self.callUp(method);
         widget.DialogManager.push(self);
-        self._me.show();
+        if (callback) {
+            callback();
+        }
     };
     
-    self.close = function close() {
+    self.close = function close(method) {
+        self.dissipate(method);
         widget.DialogManager.pop(self);
-        if (self.destroy_on_close) {
-            self.destroy();
-        } else {
-            self._me.hide();
-        }
     };
 
     self.destroy = function destroy() {
@@ -282,6 +304,11 @@ function prompt(title, message, callback) {
     prompt_dialog.set_styles('body', {'padding':'10px'});
     prompt_dialog.resize(400, 280);
     prompt_dialog.open();
+    $(id).find('.entry').keydown(function (ev) {
+        if (ev.keyCode === 13) {
+            $(id + '_ok_btn').click();
+        }
+    }).focus();
 },
 
 build_dialog:

@@ -21,7 +21,7 @@ prefs: {
 	messages: false,
 	others: false,
 	whitelist: [],
-	blacklist: [],
+	blacklist: []
 },
 
 db: null,
@@ -217,7 +217,7 @@ function open_option_dialog() {
 
 	for (var key in prefs) {
 		if (key != "blacklist" && key != "whitelist") {
-			$('#ext_hotot_cfw_' + key).attr('checked', prefs[key]);
+			$('#ext_hotot_cfw_' + key).prop('checked', prefs[key]);
 		}
 	}
 
@@ -318,7 +318,7 @@ function on_btn_save_prefs_clicked() {
 	};
 
 	for (var key in prefs) {
-		prefs[key] = $('#ext_hotot_cfw_' + key).attr('checked');
+		prefs[key] = $('#ext_hotot_cfw_' + key).prop('checked');
 	}
 
 	try {
@@ -421,7 +421,7 @@ function disable() {
 options:
 function options() {
 	ext.ContentFirewall.open_option_dialog();
-},
+}
 
 };
 

@@ -1,7 +1,7 @@
 var i18n = {
-default_locale: 'en',
+default_locale: window.navigator.language.replace('-', '_'),
 
-locale: 'en',
+locale: window.navigator.language.replace('-', '_'),
 
 forced: false,
 
@@ -21,8 +21,16 @@ function change(code, callback) {
     } else {
         i18n.forced = true;
     }
+    if (i18n.current == code) {
+        return;
+    }
+    if (code === 'en_US' || code === 'en_GB') {
+        code = 'en';
+    }
+    i18n.current = code;
     if (conf.vars.platform == 'Chrome' && !i18n.forced) {
         i18n.trans_html();
+        ui.Template.update_trans();
         if (callback != undefined)
             callback();
     } else {
@@ -31,6 +39,7 @@ function change(code, callback) {
             hotot_log('i18n', 'Use locale: ' + code);
             i18n.load_dict(result);
             i18n.trans_html();
+            ui.Template.update_trans();
             if (callback != undefined)
                 callback();
         }).error(function(jqXHR, txt, err){
@@ -40,10 +49,19 @@ function change(code, callback) {
             function (result) {
                 i18n.load_dict(result);
                 i18n.trans_html();
+                ui.Template.update_trans();
                 if (callback != undefined)
                     callback();
             });
         });
+
+        $.getScript('_locales/' + code + '/timestring.js')
+            .always(function () {
+                moment.lang(false);
+            });
+    }
+    if (conf.vars.platform == 'Chrome') {
+        $('#tbox_status_speech').attr('lang', i18n.current.replace('_', '-'));
     }
 },
 
@@ -54,7 +72,7 @@ function load_dict(new_dict) {
 
 get_message:
 function get_message(msg) {
-    if (conf.vars.platform == 'Chrome' && !i18n.forced) {
+    if (conf.vars.platform === 'Chrome' && !i18n.forced) {
         return chrome.i18n.getMessage(msg);
     } else {
         if (i18n.dict != null && i18n.dict.hasOwnProperty(msg)) {
@@ -81,14 +99,14 @@ function trans_html() {
             obj.attr('title', msg);
         }
     });
-    $('*[data-i18n-value]').each(function(idx, obj) {
+    $('*[data-i18n-placeholder]').each(function(idx, obj) {
         var obj = $(obj);
-        var msg = i18n.get_message(obj.attr('data-i18n-value'));
+        var msg = i18n.get_message(obj.attr('data-i18n-placeholder'));
         if (msg) {
-            obj.val(msg);
+            obj.attr('placeholder', msg);
         }
     });
-},
+}
 };
 
 function _(msg) {

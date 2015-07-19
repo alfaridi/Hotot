@@ -1,19 +1,18 @@
-#!/usr/bin/env python
-# -*- coding:utf8 -*-
+# -*- coding: UTF-8 -*-
 '''Hotot
 @author: U{Shellex Wei <5h3ll3x@gmail.com>}
 @license: LGPLv3+
 '''
+import sys
 import gtk
 import gobject
 import os
 import view
 import config
 import agent
-import keybinder
 import utils
 import dbus
-import dbus.service 
+import dbus.service
 import threading
 import time
 from dbus.mainloop.glib import DBusGMainLoop
@@ -25,18 +24,9 @@ except ImportError:
 else:
     HAS_INDICATOR = True
 
-try:
-    import indicate
-except ImportError:
-    HAS_ME_MENU = False
-else:
-    HAS_ME_MENU = True
-
 if __import__('os').environ.get('DESKTOP_SESSION') in ('gnome-2d', 'classic-gnome'):
     HAS_INDICATOR = False
-    HAS_ME_MENU = False
 
-HAS_ME_MENU = False
 
 try: import i18n
 except: from gettext import gettext as _
@@ -55,6 +45,7 @@ class HototDbusService(dbus.service.Object):
         bus_name = dbus.service.BusName(HOTOT_DBUS_NAME, bus=dbus.SessionBus())
         dbus.service.Object.__init__(self, bus_name, HOTOT_DBUS_PATH)
         self.app = app
+        s = []
 
     @dbus.service.method(dbus_interface=HOTOT_DBUS_NAME, in_signature="", out_signature="i")
     def unread(self):
@@ -98,9 +89,6 @@ class Hotot:
         if not HAS_INDICATOR:
             self.create_trayicon()
 
-        if HAS_ME_MENU:
-            self.create_memenu()
-
     def build_gui(self):
         self.window = gtk.Window()
         gtk.window_set_default_icon_from_file(
@@ -110,7 +98,6 @@ class Hotot:
 
         self.window.set_title(_("Hotot"))
         self.window.set_position(gtk.WIN_POS_CENTER)
-        #self.window.set_default_size(500, 550)
 
         vbox = gtk.VBox()
         scrollw = gtk.ScrolledWindow()
@@ -127,6 +114,9 @@ class Hotot:
         mitem_resume = gtk.MenuItem(_("_Resume/Hide"))
         mitem_resume.connect('activate', self.on_trayicon_activate);
         self.menu_tray.append(mitem_resume)
+        mitem_compose = gtk.MenuItem(_("_Compose"))
+        mitem_compose.connect('activate', self.on_mitem_compose);
+        self.menu_tray.append(mitem_compose)
         mitem_prefs = gtk.ImageMenuItem(gtk.STOCK_PREFERENCES)
         mitem_prefs.connect('activate', self.on_mitem_prefs_activate);
         self.menu_tray.append(mitem_prefs)
@@ -147,6 +137,9 @@ class Hotot:
         mitem_resume = gtk.MenuItem(_("_Resume/Hide"))
         mitem_resume.connect('activate', self.on_mitem_resume_activate)
         menuitem_file_menu.append(mitem_resume)
+        mitem_compose = gtk.MenuItem(_("_Compose"))
+        mitem_compose.connect('activate', self.on_mitem_compose)
+        menuitem_file_menu.append(mitem_compose)
         mitem_prefs = gtk.ImageMenuItem(gtk.STOCK_PREFERENCES)
         mitem_prefs.connect('activate', self.on_mitem_prefs_activate)
         menuitem_file_menu.append(mitem_prefs)
@@ -172,42 +165,18 @@ class Hotot:
         ##
         self.window.set_geometry_hints(min_height=380, min_width=460)
         self.window.show()
-        self.window.connect('delete-event', gtk.Widget.hide_on_delete)
-
-    def create_memenu(self):
-        # Memssage Menu indicator
-        self.mm = indicate.indicate_server_ref_default()
-        self.mm.set_type('message.hotot')
-        self.mm.set_desktop_file(utils.get_ui_object('hotot.desktop'))
-        self.mm.connect('server-display', self.on_mm_server_activate)
-        self.mm.show()
-
-    def emit_incoming(self, group, tweets):
-        self.dbus_service.incoming(group, tweets)
+        self.window.connect('delete-event', self.on_window_delete)
+        # self.window.connect('size-allocate', self.on_window_size_allocate)
 
     def update_status(self, text):
         self.webv.execute_script('update_status("%s")' % text)
 
     def unread_alert(self, subtype, sender, body="", count=0):
-        if HAS_ME_MENU:
-            try:
-                idr = indicate.Indicator()
-            except:
-                idr = indicate.IndicatorMessage()
-            idr.set_property('subtype', subtype)
-            idr.set_property('sender', sender)
-            idr.set_property('body', body)
-            idr.set_property('draw-attention', 'true' if count > 0 else 'false')
-            idr.set_property('count', count)
-            idr.connect('user-display', self.on_mm_activate)
-            idr.show()
-            self.mm_indicators[subtype] = idr
-
         if count > 0:
             self.start_blinking()
         else:
             self.stop_blinking()
-        
+
         if not HAS_INDICATOR:
             self.trayicon.set_tooltip("Hotot: %d unread tweets/messages." % count if count > 0 else _("Hotot: Click to Active."))
         self.state['unread_count'] = count
@@ -235,16 +204,17 @@ class Hotot:
     def stop_blinking(self):
         self.inblinking = False
 
-    def on_mm_activate(self, idr, arg1):
-        if HAS_ME_MENU:
-            subtype = idr.get_property('subtype')
-            idr.set_property('draw-attention', 'false')
-            self.window.present()
-            if subtype in self.mm_indicators:
-                del self.mm_indicators[subtype]
-            
-    def on_mm_server_activate(self, serv, arg1):
-        self.window.present()
+    def on_window_delete(self, widget, event):
+        if 'close_to_exit' in config.settings and config.settings['close_to_exit']:
+            self.quit()
+        else:
+            return widget.hide_on_delete()
+
+    def on_window_size_allocate(self, widget, allocation):
+        x, y = self.window.get_position()
+        script = 'if (typeof conf !=="undefined"){conf.settings.pos_x=%d; \
+        conf.settings.pos_y=%d;}' % (x, y)
+        gobject.idle_add(self.webv.execute_script, script)
 
     def on_btn_update_clicked(self, btn):
         if (self.tbox_status.get_text_length() <= 140):
@@ -273,6 +243,11 @@ class Hotot:
         globals.prefs_dialog.open();''');
         self.window.present()
 
+    def on_mitem_compose(self, item):
+        if self.is_sign_in:
+            agent.execute_script('ui.StatusBox.open();')
+        self.window.present()
+
     def on_mitem_about_activate(self, item):
         agent.execute_script('globals.about_dialog.open();');
         self.window.present()
@@ -281,12 +256,10 @@ class Hotot:
         self.quit()
 
     def quit(self, *args):
+        self.release_hotkey()
         self.stop_blinking()
-        gtk.gdk.threads_leave()
         self.window.destroy()
         gtk.main_quit()
-        import sys
-        sys.exit(0)
 
     def apply_settings(self):
         # init hotkey
@@ -298,20 +271,35 @@ class Hotot:
             , config.settings['size_h'])
         # apply proxy
         self.apply_proxy_setting()
+        # starts minimized
+        if config.settings['starts_minimized']:
+            self.window.hide()
 
     def apply_proxy_setting(self):
-        if config.settings['use_http_proxy']:
-            proxy_host = config.settings['http_proxy_host']
-            proxy_port = config.settings['http_proxy_port']
+        proxy_type = agent.get_prefs('proxy_type')
+        if proxy_type == 'http':
+            proxy_host = agent.get_prefs('proxy_host')
+            proxy_port = agent.get_prefs('proxy_port')
             proxy_scheme = 'https'
-            if config.settings['use_http_proxy_auth']:
-                auth_user = config.settings['http_proxy_auth_name']
-                auth_pass = config.settings['http_proxy_auth_password']
+            if agent.get_prefs('proxy_auth'):
+                auth_user = agent.get_prefs('proxy_auth_name')
+                auth_pass = agent.get_prefs('proxy_auth_password')
                 utils.webkit_set_proxy_uri(proxy_scheme, proxy_host, proxy_port, auth_user, auth_pass)
             else:
-                utils.webkit_set_proxy_uri(proxy_scheme, proxy_host, proxy_port, '', '')
+                utils.webkit_set_proxy_uri(proxy_scheme, proxy_host, proxy_port)
+        elif proxy_type == 'system':
+            if 'HTTP_PROXY' in os.environ and os.environ["HTTP_PROXY"]:
+                url = os.environ["HTTP_PROXY"]
+            elif 'http_proxy' in os.environ and os.environ["http_proxy"]:
+                url = os.environ["http_proxy"]
+            else:
+                url = None
+            utils.webkit_set_proxy_uri(url)
+        elif proxy_type == 'socks':
+            # TODO not implemented yet
+            utils.webkit_set_proxy_uri()
         else:
-            utils.webkit_set_proxy_uri('', '', '', '', '')
+            utils.webkit_set_proxy_uri()
         # workaround for a BUG of webkitgtk/soupsession
         # proxy authentication
         agent.execute_script('''
@@ -319,7 +307,17 @@ class Hotot:
 
     def init_hotkey(self):
         try:
+            import keybinder
             keybinder.bind(
+                  config.settings['shortcut_summon_hotot']
+                , self.on_hotkey_compose)
+        except:
+            pass
+
+    def release_hotkey(self):
+        try:
+            import keybinder
+            keybinder.unbind(
                   config.settings['shortcut_summon_hotot']
                 , self.on_hotkey_compose)
         except:
@@ -385,17 +383,18 @@ def main():
         import dl
         libc = dl.open('/lib/libc.so.6')
         libc.call('prctl', 15, 'hotot', 0, 0, 0)
-        
+
     agent.init_notify()
     app = Hotot()
     agent.app = app
     if HAS_INDICATOR:
         indicator = appindicator.Indicator('hotot',
                                             'hotot',
-                                            appindicator.CATEGORY_COMMUNICATIONS)
+                                            appindicator.CATEGORY_COMMUNICATIONS,
+                                            utils.get_ui_object('image'))
         indicator.set_status(appindicator.STATUS_ACTIVE)
-        indicator.set_icon(utils.get_ui_object('image/ic24_hotot_mono_light.svg'))
-        indicator.set_attention_icon(utils.get_ui_object('image/ic24_hotot_mono_dark.svg'))
+        indicator.set_icon('ic24_hotot_mono_light')
+        indicator.set_attention_icon('ic24_hotot_mono_light_blink')
         indicator.set_menu(app.menu_tray)
         app.indicator = indicator
 
@@ -406,4 +405,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+    sys.exit(0)
 

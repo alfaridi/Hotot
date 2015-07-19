@@ -9,6 +9,7 @@ _k_limit: 3,
 init:
 function init() {
     notification.check_proc();
+    setInterval(notification.check_proc, 1000);
 },
 
 check_proc:
@@ -17,35 +18,29 @@ function check_proc() {
         var tuple = notification._queue.shift();
         notification.notify(tuple[0], tuple[1], tuple[2], tuple[3]);
     }
-    setTimeout(notification.check_proc, 1000);
 },
 
 notify:
 function notify(title, summary, image, type) {
-    title = title.replace(/&gt;/g, '>').replace(/&lt;/g, '<');
-    summary = summary.replace(/&gt;/g, '>').replace(/&lt;/g, '<');
-    if (conf.get_current_profile().preferences.use_native_notify) {
-        if (util.is_native_platform()) {
-            hotot_action('system/notify/'
-                + type
-                + '/' + encodeURIComponent(title)
-                + '/' + encodeURIComponent(summary)
-                + '/' + encodeURIComponent(image));
-        } else if (conf.vars.platform == 'Chrome') {
-            var img_url = image? image: './image/ic64_hotot.png';
-            var notification = webkitNotifications.createNotification(
-              img_url, title, summary);
-            notification.show();
-            setTimeout(function() {notification.cancel()}, 5000);
-        }
-    } else {
-        // @TODO other notify way
+    title = title.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+    summary = summary.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+    if (util.is_native_platform()) {
+        hotot_action('system/notify/'
+            + type
+            + '/' + encodeURIComponent(title)
+            + '/' + encodeURIComponent(summary)
+            + '/' + encodeURIComponent(image));
+    } else if (conf.vars.platform == 'Chrome') {
+        var img_url = image? image: './image/ic64_hotot.png';
+        var notification = webkitNotifications.createNotification(img_url, title, summary);
+        notification.show();
+        setTimeout(function() {notification.cancel()}, 5000);
     }
 },
 
 push:
 function push(title, summary, image, type) {
     notification._queue.push([title, summary, image, type]);
-},
+}
 
 };

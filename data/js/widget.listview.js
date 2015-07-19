@@ -23,14 +23,16 @@ function WidgetListView(id, name, params) {
     self._loadmore_fail = null;
     self._init = null;
     self._destory = null;
+    self._last_load_more_time = Date.now();
     self.former = null;
     self.method = '';
     self.header_html = '';
+    self.header_html_ex = '';
     self.type = '';
     self.title = 'New Page';
     self.interval = 0;
     self.resume_pos = false;
-    self.changed = false;
+    self.incoming_num = 0;
     self.is_trim = true;
 
     self.since_id = null;
@@ -39,6 +41,7 @@ function WidgetListView(id, name, params) {
     self.cursor = '';
     self.screen_name = '';
     self.slug = '';
+    self.query = '';
 
     self.use_notify = false;
     self.use_notify_sound = false;
@@ -47,9 +50,14 @@ function WidgetListView(id, name, params) {
     self.init = function init(id, name, params) {
         self._me = $(id);
         self.name = name;
-        self._body = self._me.children('.listview_body');
-        self._header = self._me.children('.listview_header');
-        self._footer = self._me.children('.listview_footer');
+        self._body = self._me.find('.listview_body');
+        self._header = self._me.find('.listview_header');
+        self._footer = self._me.find('.listview_footer');
+        self._content = self._me.find('.listview_content');
+        self.scrollbar = new widget.Scrollbar(self._me.find('.scrollbar_track'), self._me.find('.scrollbar_content'))
+        if (navigator.platform === 'iPad') {
+            self.scrollbar.disable()
+        }
 
         // notification
         var prefs = conf.profiles[conf.current_name].preferences;
@@ -122,10 +130,24 @@ function WidgetListView(id, name, params) {
         if (self._init != null) {
             self._init(self);
         }
+        // mochi widget
+        self._header.find(".mochi_toggle").click(
+            function(){
+                $(this).attr("checked", this.checked);
+            }
+        );
+        self._header.find(".mochi_button_group_item").click(
+            function(){
+                var a = $(this).attr("name");
+                self._header.find(".mochi_button_group_item[name="+a+"]").not(this).removeClass("selected");
+                self._header.find(this).addClass("selected");
+            }
+        );
+        ui.Slider.bind_common_settings(self);
     };
 
     self.create = function create(){
-        self._me.scroll(
+        self._content.scroll(
         function (event) {
             if (this.scrollTop != 0) {
                 self.resume_pos = true;
@@ -135,19 +157,24 @@ function WidgetListView(id, name, params) {
 
             if (this.scrollTop < 30) {
                 widget.ListView.compress_page(self);
+                self.scrollbar.recalculate_layout();
             } else if (this.scrollTop + this.clientHeight + 30 > this.scrollHeight) {
                 self._body.children('.card:hidden:lt(20)').show();
+                self.scrollbar.recalculate_layout();
                 // load more automaticly
                 if (this.scrollTop + this.clientHeight + 30 > this.scrollHeight) {
-
+                    var now = Date.now();
                     self.resume_pos = false;
-                    self.loadmore();
+                    if (1000 <= now - self._last_load_more_time) {
+                        self._last_load_more_time = now;
+                        self.loadmore();
+                    }
                 }
             }
             // hide tweet bar
             ui.Main.closeTweetMoreMenu();
         });
-        self._header.children('.header_content').html(self.header_html);
+        self._header.children('.header_content').html(self.header_html+self.header_html_ex);
     };
 
     self.destroy = function destroy() {
@@ -159,6 +186,9 @@ function WidgetListView(id, name, params) {
         for (var k in self) {
             self[k] = null;
         }
+        if (self.scrollbar) {
+            self.scrollbar.destroy()
+        }
         self = null;
     };
 
@@ -167,6 +197,7 @@ function WidgetListView(id, name, params) {
             self._footer.show();
             self._load(self, self.load_success, self.load_fail);
         }
+        self.update_timestamp();
     };
 
     self.loadmore = function loadmore() {
@@ -174,20 +205,23 @@ function WidgetListView(id, name, params) {
             self._footer.show();
             self._loadmore(self, self.loadmore_success, self.loadmore_fail);
         }
+        self.update_timestamp();
     };
 
     self.load_success = function load_success(json) {
         if (self == null) return;
         self._footer.hide();
-        if (json.length == 0) { return; }
+        if (json.hasOwnProperty('length') && json.length == 0) { return; }
         var tweets = json;
         if (self.item_type == 'phoenix_search') {
-            tweets = json.statuses;
+            if (json.statuses)
+                tweets = json.statuses;
         }
-        if (tweets.length == 0) { return; }
-        for (var i = 0, l = tweets.length; i < l; i+= 1) {
-            if (! tweets[i].hasOwnProperty('id_str')) {
-                tweets[i].id_str = tweets[i].id.toString();
+        if (tweets.hasOwnProperty('length')) {
+            for (var i = 0, l = tweets.length; i < l; i+= 1) {
+                if (!tweets[i].hasOwnProperty('id_str') && tweets[i].hasOwnProperty('id')) {
+                    tweets[i].id_str = tweets[i].id.toString();
+                }
             }
         }
 
@@ -202,9 +236,7 @@ function WidgetListView(id, name, params) {
         if (self.item_type == 'cursor') {       // friedns or followers
             self.cursor = json.next_cursor_str;
         } else if (self.item_type == 'page') {  //fav, 
-            if (json.page){
-                self.page = json.page + 1;
-            }
+            self.page = self.page + 1;
         } else if (self.item_type == 'search'){ 
             if (json.max_id_str){
                 self.max_id = json.max_id_str;
@@ -213,21 +245,23 @@ function WidgetListView(id, name, params) {
                 self.page = json.page;
             }
         } else {    // other
-            self.since_id = tweets[count - 1].id_str;
+            self.since_id = tweets[0].id_str;
             if (self.max_id == null) {
-                self.max_id = tweets[0].id_str;
+                self.max_id = tweets[count - 1].id_str;
             }
         }
         // thread container doesn't have a property '_me'
-        if (self.hasOwnProperty('_me') && self._me.get(0).scrollTop < 100) {
+        if (self.hasOwnProperty('_me') && self._content.get(0).scrollTop < 100) {
             if (self.is_trim) {
                 widget.ListView.trim_page(self);
             }
             widget.ListView.compress_page(self);
         }
+        self.scrollbar.recalculate_layout();
     };
     
     self.load_fail = function load_fail(json) {
+        self._footer.hide();
         if (self._load_fail != null) {
             self._load_fail(self, json)
         }
@@ -241,7 +275,6 @@ function WidgetListView(id, name, params) {
         if (self.item_type == 'phoenix_search') {
             tweets = json.statuses;
         }
-        if (tweets.length == 0) { return; }
         for (var i = 0, l = tweets.length; i < l; i+= 1) {
             if (!tweets[i].hasOwnProperty('id_str')) {
                 tweets[i].id_str = tweets[i].id.toString();
@@ -254,9 +287,7 @@ function WidgetListView(id, name, params) {
         if (self.item_type == 'cursor') {        // friends or followers
             self.cursor = json.next_cursor_str;
         } else if (self.item_type == 'page') { // fav, 
-            if (json.page){
-                self.page = self.page + 1;
-            }
+            self.page = self.page + 1;
         } else if (self.item_type == 'search'){
             if (json.max_id_str){
                 self.max_id = json.max_id_str;
@@ -267,10 +298,11 @@ function WidgetListView(id, name, params) {
         } else {    // other
             if (count == 0) { return; }
             self.max_id = tweets[count - 1].id_str;
-            if (self.since_id == 1) {
+            if (self.since_id == null) {
                 self.since_id = tweets[0].id_str;
             }
         }
+        self.scrollbar.recalculate_layout();
     };
     
     self.loadmore_fail = function loadmore_fail(json) {
@@ -284,6 +316,25 @@ function WidgetListView(id, name, params) {
         self._body.find('.card').unbind();
         self._body.find('.card a').unbind();
         self._body.empty();
+        self.scrollbar.recalculate_layout();
+    };
+
+    self.update_timestamp = function () {
+        var prefs = conf.profiles[conf.current_name].preferences;
+        if(prefs.show_relative_timestamp) {
+            var now = moment();
+            //Update relative timestamp, update first 20 tweets
+            self._content.find('.tweet_update_timestamp:lt(20)').each(function () {
+                var a = $(this);
+                var m = moment(a.attr("title"));
+
+                // only update DOM created today
+                if(now.diff(m, "days") === 0) {
+                    a.text(ui.Template.to_short_time_string(m));
+                    //console.log(ui.Template.to_short_time_string(m));
+                }
+            });
+        }
     };
 
     self.init(id, name, params);

@@ -5,82 +5,60 @@ cache: null,
 
 MAX_TWEET_CACHE_SIZE: 4096,
 
-MAX_USER_CACHE_SIZE: 512,
+MAX_USER_CACHE_SIZE: 1024,
 
-version: 2,
+version: 3,
 
 init:
 function init (callback) {
     db.database = window.openDatabase('hotot.cache', '', 'Cache of Hotot', 10);
     db.get_version(function (version) {
         var db_version = parseInt(version);
-        if (db_version != db.version) {
-            db.create_database(callback);
-        } else {
+        if (db_version === 2) { // from 2 to 3
+            db.create_cache(function () {
+                db.update_version(callback);
+            });
+        } else if (db_version === db.version) {
             if (typeof (callback) != 'undefined') {
                 callback();
             }
+        } else { // rebuild
+            db.create_sys(function () {
+                db.create_cache(function () {
+                    db.update_version(callback);
+                });
+            });
         }
     });
 },
 
-create_database:
-function create_database(callback) {
+create_sys:
+function create_sys(callback) {
     db.database.transaction(function (tx) {
     var procs = [
-    function() {
+    function () {
         tx.executeSql('DROP TABLE IF EXISTS "Info"', [],
         function () {
             $(window).dequeue('_database');
         });
     },
     function () {
-        tx.executeSql('DROP TABLE IF EXISTS "TweetCache"', [],
+        tx.executeSql('DROP TABLE IF EXISTS "Profile"', [],
         function () {
             $(window).dequeue('_database');
         });
     },
     function () {
-            tx.executeSql('DROP TABLE IF EXISTS "UserCache"', [],
-            function () {
-                $(window).dequeue('_database');
-            });
-    },
-    function () {
-            tx.executeSql('DROP TABLE IF EXISTS "Profile"', [],
-            function () {
-                $(window).dequeue('_database');
-            });
-    },
-    function () {
-            tx.executeSql('CREATE TABLE IF NOT EXISTS "Info" ("key" CHAR(256) PRIMARY KEY  NOT NULL  UNIQUE , "value" TEXT NOT NULL )', [],
+        tx.executeSql('CREATE TABLE IF NOT EXISTS "Info" ("key" CHAR(256) PRIMARY KEY  NOT NULL  UNIQUE , "value" TEXT NOT NULL )', [],
             function () {
                 $(window).dequeue('_database');
             });    
     },
     function () {
-            tx.executeSql('CREATE TABLE IF NOT EXISTS "TweetCache" ("id" CHAR(256) PRIMARY KEY  NOT NULL  UNIQUE , "status" NCHAR(140) NOT NULL, "json" TEXT NOT NULL )', [],
+        tx.executeSql('CREATE TABLE IF NOT EXISTS "Profile" ("name" CHAR(256) PRIMARY KEY  NOT NULL UNIQUE , "protocol" CHAR(64) NOT NULL , "preferences" TEXT NOT NULL, "order" INTEGER DEFAULT 0)', [],
             function () {
                 $(window).dequeue('_database');
             });    
-    },
-    function () {
-            tx.executeSql('CREATE TABLE IF NOT EXISTS "UserCache" ("id" CHAR(256) PRIMARY KEY  NOT NULL  UNIQUE , "screen_name" CHAR(64) NOT NULL , "json" TEXT NOT NULL )', [],
-            function () {
-                $(window).dequeue('_database');
-            });    
-    },
-    function () {
-            tx.executeSql('CREATE TABLE IF NOT EXISTS "Profile" ("name" CHAR(256) PRIMARY KEY  NOT NULL UNIQUE , "protocol" CHAR(64) NOT NULL , "preferences" TEXT NOT NULL, "order" INTEGER DEFAULT 0)', [],
-            function () {
-                $(window).dequeue('_database');
-            });    
-    },
-    function () {
-        tx.executeSql('INSERT or REPLACE INTO Info VALUES("version", ?)', [db.version], 
-        function () {
-            $(window).dequeue('_database');
-        });
     },
     function () {
         tx.executeSql('INSERT or REPLACE INTO Info VALUES("settings", ?)', [JSON.stringify(conf.default_settings)], 
@@ -94,7 +72,66 @@ function create_database(callback) {
         }    
     }
     ];
+    $(window).queue('_database', procs);
+    $(window).dequeue('_database');
+    });
+},
 
+update_version:
+function update_version(callback) {
+    db.database.transaction(function (tx) {
+    var procs = [
+    function () {
+        tx.executeSql('INSERT or REPLACE INTO Info VALUES("version", ?)', [db.version], 
+        function () {
+            $(window).dequeue('_database');
+        });
+    },
+    function () {
+        if (typeof (callback) != 'undefined') {
+            callback();
+        }    
+    }
+    ];
+    $(window).queue('_database', procs);
+    $(window).dequeue('_database');
+    });
+},
+
+create_cache:
+function create_cache(callback) {
+    db.database.transaction(function (tx) {
+    var procs = [
+    function () {
+        tx.executeSql('DROP TABLE IF EXISTS "TweetCache"', [],
+        function () {
+            $(window).dequeue('_database');
+        });
+    },
+    function () {
+            tx.executeSql('DROP TABLE IF EXISTS "UserCache"', [],
+            function () {
+                $(window).dequeue('_database');
+            });
+    },
+    function () {
+            tx.executeSql('CREATE TABLE IF NOT EXISTS "TweetCache" ("id" CHAR(256) PRIMARY KEY  NOT NULL  UNIQUE , "status" NCHAR(140) NOT NULL, "json" TEXT NOT NULL )', [],
+            function () {
+                $(window).dequeue('_database');
+            });    
+    },
+    function () {
+            tx.executeSql('CREATE TABLE IF NOT EXISTS "UserCache" ("id" INTEGER PRIMARY KEY  AUTOINCREMENT  UNIQUE  DEFAULT 0, "user_id" CHAR(256) NOT NULL UNIQUE, "screen_name" CHAR(64) NOT NULL , "json" TEXT NOT NULL )', [],
+            function () {
+                $(window).dequeue('_database');
+            });    
+    },
+    function () {
+        if (typeof (callback) != 'undefined') {
+            callback();
+        }    
+    }
+    ];
     $(window).queue('_database', procs);
     $(window).dequeue('_database');
     });
@@ -104,7 +141,7 @@ dump_users:
 function dump_users(json_obj) {
     var dump_single_user = function (tx, user) {
         // update user obj
-        tx.executeSql('INSERT or REPLACE INTO UserCache VALUES (?, ?, ?)', [user.id_str, user.screen_name, JSON.stringify(user)],
+        tx.executeSql('INSERT OR REPLACE INTO UserCache (user_id, screen_name, json) VALUES (?, ?, ?)', [user.id_str, user.screen_name, JSON.stringify(user)],
         function (tx, rs) {},
         function (tx, error) {
             hotot_log('DB', 'INSERT ERROR: '+ error.code + ','+ error.message);
@@ -122,8 +159,9 @@ function dump_users(json_obj) {
 dump_tweets:
 function dump_tweets(json_obj) {
     var dump_single_user = function (tx, user) {
-        tx.executeSql('INSERT or REPLACE INTO UserCache VALUES (?, ?, ?)', [user.id_str, user.screen_name, JSON.stringify(user)],
-        function (tx, rs) {},
+        tx.executeSql('INSERT OR REPLACE INTO UserCache (user_id, screen_name, json) VALUES (?, ?, ?)', [user.id_str, user.screen_name, JSON.stringify(user)],
+        function (tx, rs) {
+        },
         function (tx, error) {
             hotot_log('DB', 'INSERT ERROR: '+ error.code + ','+ error.message);
         });
@@ -203,7 +241,7 @@ function get_user(screen_name, callback) {
 search_user:
 function search_user(query, callback) {
     db.database.transaction(function (tx) {
-        tx.executeSql('SELECT id, screen_name, json FROM UserCache WHERE screen_name LIKE \'%'+query+'%\'', [], 
+        tx.executeSql('SELECT user_id, screen_name, json FROM UserCache WHERE screen_name LIKE \'%'+query+'%\'', [], 
             function(tx, rs) {callback(tx,rs);});
     });
 },
@@ -216,10 +254,18 @@ function get_users_starts_with(starts, callback) {
     });
 },
 
+get_screen_names:
+function get_screen_names(callback) {
+    db.database.transaction(function (tx) {
+        tx.executeSql('SELECT screen_name FROM UserCache ORDER BY screen_name', [], 
+            function(tx, rs) {callback(tx,rs);});
+    });
+},
+
 reduce_user_cache:
 function reduce_user_cache(limit, callback) {
     db.database.transaction(function (tx) {
-        tx.executeSql('DELETE FROM UserCache WHERE id in (SELECT id FROM TweetCache ORDER BY id limit ?)', [limit], callback);
+        tx.executeSql('DELETE FROM UserCache WHERE id in (SELECT id FROM UserCache ORDER BY id limit ?)', [limit], callback);
     });
 },
 
@@ -247,6 +293,26 @@ function get_user_cache_size(callback) {
         function (tx, rs) {
             callback(rs.rows.item(0)['count(*)']);
         });
+    });
+},
+
+reduce_db:
+function reduce_db () {
+    db.get_tweet_cache_size(function (size) {
+        if (db.MAX_TWEET_CACHE_SIZE < size) {
+            db.reduce_tweet_cache(
+                parseInt(db.MAX_TWEET_CACHE_SIZE*2/3)
+            , function () {
+            })
+        }
+    });
+    db.get_user_cache_size(function (size) {
+        if (db.MAX_USER_CACHE_SIZE < size) {
+            db.reduce_user_cache(
+                parseInt(db.MAX_USER_CACHE_SIZE*2/3)
+            , function () {
+            })
+        }
     });
 },
 
@@ -378,7 +444,7 @@ function get_all_profiles(callback) {
             }
         }); 
     });
-},
+}
 
 };
 

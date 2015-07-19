@@ -7,7 +7,7 @@ name: 'Hotot Translate',
 
 description: 'Translate tweets.',
 
-version: '1.0',
+version: '1.1',
 
 author: 'Shellex Wai',
 
@@ -34,10 +34,10 @@ languages: {
  'bg':  'Bulgarian'   ,
  'my':  'Burmese'     ,
  'ca':  'Catalan'     ,
- 'chr':  'Cherokee'    ,
- 'zh':  'Chinese'     ,
- 'zh-CN':  'Chinese (Simplified)' ,
- 'zh-TW':  'Chinese (Traditional)' ,
+ 'chr':  'Cherokee'   ,
+ 'zh':  '中文'        ,
+ 'zh-CN':  '简体中文' ,
+ 'zh-TW':  '繁體中文' ,
  'co':  'Corsican'    ,
  'hr':  'Croatian'    ,
  'cs':  'Czech'       ,
@@ -50,11 +50,11 @@ languages: {
  'fo':  'Faroese'     ,
  'tl':  'Filipino'    ,
  'fi':  'Finnish'     ,
- 'fr':  'French'      ,
+ 'fr':  'Française'   ,
  'fy':  'Frisian'     ,
  'gl':  'Galician'    ,
  'ka':  'Georgian'    ,
- 'de':  'German'      ,
+ 'de':  'Deutsch'      ,
  'el':  'Greek'       ,
  'gu':  'Gujarati'    ,
  'ht':  'Haitian (Creole)' ,
@@ -106,7 +106,7 @@ languages: {
  'si':  'Sinhalese' ,
  'sk':  'Slovak' ,
  'sl':  'Slovenian' ,
- 'es':  'Spanish' ,
+ 'es':  'Español' ,
  'su':  'Sundanese' ,
  'sw':  'Swahili' ,
  'sv':  'Swedish' ,
@@ -178,15 +178,43 @@ function do_translate_selection(dst_lang) {
 
 do_translate:
 function do_translate(dst_lang, text, callback) {
-    var url = 'http://ajax.googleapis.com/ajax/services/language/translate?langpair=|' + dst_lang + '&v=1.0&q=' + encodeURIComponent(text)
-    $.getJSON(url, callback);
+    var url = 'http://translate.google.com/translate_a/t?client=t&text=' + encodeURIComponent(text) + '&hl=' + dst_lang + '&sl=auto&tl=' + dst_lang + '&multires=1&otf=2&ssel=0&tsel=0&uptl=' + dst_lang + '&alttl=en&sc=1';
+    var processData = function (data) {
+        var result = {};
+        result.responseData = {};
+        var res = JSON.parse(data.replace(/,,+/g, ','));
+        var translatedText = '';
+        if (res[0]) {
+            for (var i = 0; i < res[0].length; i += 1) {
+                translatedText += res[0][i][0];
+            }
+        }
+        result.lang = res[1];
+        result.responseStatus = 200;
+        result.responseData.translatedText = translatedText;
+        callback(result);
+    }
+    $.ajax({
+        url: url,
+        success: function(data, textStatus, jqXHR) {
+            processData(data);
+        },
+        error: function(jqXHR, textStatus, errorThrown) {
+            if (jqXHR.status === 200) {
+                processData(jqXHR.responseText);
+            } else {
+                var data = {};
+                data.responseDetails = 'Err...';
+                callback(data);
+            }
+        }
+    });
 },
 
 do_translate_tweet:
 function do_translate_tweet(li_id, dst_lang) {
     var tweet_id = li_id;
     var text = $(tweet_id + ' .card_body').children('.text');
-    var ht = $(tweet_id + ' .card_body .hotot_translate');
     var style = 'background:transparent url('
                 + 'ext/'+ext.HototTranslate.id+'/ic16_translate.png'
                 +') no-repeat;padding-left:20px;';
@@ -195,11 +223,12 @@ function do_translate_tweet(li_id, dst_lang) {
         var content = '';
         if (result.responseStatus == 200) {
             content = '<strong style="'+style+'">'
-                + ext.HototTranslate.languages[dst_lang] +'</strong>: '
+                + result.lang + '&rarr;'+ ext.HototTranslate.languages[dst_lang] +'</strong>: '
                 + result.responseData.translatedText;
         } else {
             content = '<strong style="'+style+'">ERROR</strong>: ' + result.responseDetails;
         }
+        var ht = $(tweet_id + ' > .card_body > .hotot_translate');
         if (ht.length == 0) {
             text.after(
                 '<div class="hotot_translate" style="background-color:rgba(0,0,0,0.1); padding: 5px; border-radius: 5px;">'+content+'</div>');
@@ -290,7 +319,7 @@ function options() {
             .attr('selectedIndex', selected_idx);
     });
     ext.HototTranslate.option_dialog.open();
-},
+}
 
 }
 

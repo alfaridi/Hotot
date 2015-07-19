@@ -3,10 +3,15 @@ ui.PeopleView = {
 
 relation_map: {},
 
-relation_icon_set: ['', '&infin;', '&ni;', '&isin;', '&empty; '],
+relation_icon_set: [' ', '&infin; ', '&ni; ', '&isin; ', '&empty; '],
 
 init:
 function init() {
+    ui.PeopleView.update_trans();
+},
+
+update_trans:
+function update_trans (argument) {
     ui.PeopleView.relation_map = { 
           0: _('hey_it_is_you')
         , 1: _('you_are_friends')
@@ -18,27 +23,39 @@ function init() {
 
 init_view:
 function init_view(view) {
+    ui.PeopleView.update_trans();
+
     var vcard = view._header.find('.people_vcard');
-    var vcard_profile_btns = vcard.find('.radio_group_btn');
-    vcard_profile_btns.click(function (event) {
+    vcard.find('.mochi_button_group_item').click(function () {
         var pagename = '.' + $(this).attr('href').substring(1);
-        vcard_profile_btns.removeClass('selected');
-        $(this).addClass('selected');
         vcard.find('.vcard_tabs_page').hide();
         vcard.find(pagename).show();
+
+        var a = $(this).attr("name");
+        $(".mochi_button_group_item[name=" + a + "]").not(this).removeClass("selected");
+        $(this).addClass("selected");
         return false;
     });
     var toggle = view._header.find('.people_view_toggle');
-    var sub_view_btns = toggle.find('.radio_group_btn');
+    var sub_view_btns = toggle.find('.mochi_button_group_item');
     sub_view_btns.click(function (event) {
         var pagename = $(this).attr('href').substring(1);
-        if (pagename == 'list') {
-            toggle.find('.lists_memu').toggle();
+        if (pagename === 'list') {
+            toggle.find('.lists_menu').toggle();
+        } else if (pagename === 'people') {
+            toggle.find('.people_menu').toggle();
         } else {
-            sub_view_btns.removeClass('selected');
+            var a = $(this).attr("name");
+            sub_view_btns.not(this).removeClass('selected');
             $(this).addClass('selected');
             ui.PeopleView.switch_sub_view(view, pagename);
         }
+        return false;
+    });
+
+    vcard.find('.profile_img_wrapper').click(function() {
+        ui.Previewer.reload($(this).attr('href'))
+        ui.Previewer.open();
         return false;
     });
 
@@ -47,19 +64,19 @@ function init_view(view) {
         var _this = this;
         if ($(this).hasClass('unfo')) {
             toast.set(_("unfollow_at") + view.screen_name + " ...").show();
-            lib.twitterapi.destroy_friendships(view.screen_name,
+            globals.twitterClient.destroy_friendships(view.screen_name,
             function () {
                 toast.set(
                     _("unfollow_at")+ view.screen_name+" Successfully!").show();
-                $(_this).text(_("follow")).removeClass('unfo');
+                $(_this).text(_("follow")).removeClass('unfo').addClass('blue');
             });
         } else {
             toast.set(_("follow_at") + view.screen_name + " ...").show();
-            lib.twitterapi.create_friendships(view.screen_name,
+            globals.twitterClient.create_friendships(view.screen_name,
             function () {
                 toast.set(
                     _("follow_at")+ view.screen_name+" Successfully!").show();
-                $(_this).text(_("unfollow")).addClass('unfo');
+                $(_this).text(_("unfollow")).addClass('unfo').removeClass('blue');
             });
         }
     });
@@ -91,9 +108,22 @@ function init_view(view) {
         return false;
     });
 
+    vcard.find('.message_menu_item').click(
+    function (event) {
+        ui.StatusBox.set_dm_target(view.screen_name);
+        ui.StatusBox.set_status_text('');
+        ui.StatusBox.open(
+        function () {
+            ui.StatusBox.change_mode(ui.StatusBox.MODE_DM);
+            ui.StatusBox.move_cursor(ui.StatusBox.POS_END);
+        });
+        people_action_more_memu.hide();
+        return false;
+    });
+
     vcard.find('.add_to_list_menu_item').click(
     function (event) {
-        ui.AddToListDlg.load();
+        ui.AddToListDlg.load(view.screen_name);
         globals.add_to_list_dialog.open(); 
     });
 
@@ -102,10 +132,11 @@ function init_view(view) {
         if (!confirm("Are you sure you want to block @"+view.screen_name+"?!\n"))
             return;
         toast.set("Block @" + view.screen_name + " ...").show();
-        lib.twitterapi.create_blocks(view.screen_name,
-        function () {
+        globals.twitterClient.create_blocks(view.screen_name,
+        function (result) {
             toast.set(
-                "Block @"+ view.screen_name+" Successfully!").show();
+                "Block @"+ result.screen_name+" Successfully!").show();
+            globals.blocking_ids.push(result.id_str);
         });
         people_action_more_memu.hide();
     });
@@ -113,10 +144,14 @@ function init_view(view) {
     vcard.find('.unblock_menu_item').click(
     function (event) {
         toast.set("Unblock @" + view.screen_name + " ...").show();
-        lib.twitterapi.create_blocks(view.screen_name,
-        function () {
+        globals.twitterClient.destroy_blocks(view.screen_name,
+        function (result) {
             toast.set(
-                "Unblock @"+ view.screen_name+" Successfully").show();
+                "Unblock @"+ result.screen_name+" Successfully").show();
+            var pos = globals.blocking_ids.indexOf(result.id_str);
+            if (pos !== -1) {
+                globals.blocking_ids.splice(pos, 1);
+            }
         });
         people_action_more_memu.hide();
     });
@@ -126,7 +161,7 @@ function init_view(view) {
         if(!confirm('Are you sure you want to BLOCK them and REPORT for SPAM?')) 
             return;
         toast.set("Report @" + view.screen_name + " for spam...").show();
-        lib.twitterapi.create_blocks(view.screen_name,
+        globals.twitterClient.create_blocks(view.screen_name,
         function () {
             toast.set(
                 "Report @"+ view.screen_name+" for Spam Successfully").show();
@@ -134,21 +169,63 @@ function init_view(view) {
         people_action_more_memu.hide();
     });
 
-    var lists_memu = toggle.find('.lists_memu');
-    toggle.find('.people_view_list_trigger').mouseleave(function () {
-        lists_memu.hide();
+    var people_menu = toggle.find('.people_menu');
+    toggle.find('.people_view_people_trigger').mouseleave(function () {
+        people_menu.hide();
     });
 
-    lists_memu.find('.user_lists_menu_item').click(function () {
+    people_menu.find('.followers_menu_item').click(function () {
+        view.is_trim = false;
+        view.item_type = 'cursor';
+        view.cursor = '';
+        view.former = ui.Template.form_people;
+        view._load = ui.PeopleView.load_follower;
+        view._loadmore = ui.PeopleView.loadmore_follower;
+        view._load_success = ui.Main.load_people_success;
+        view._loadmore_success = ui.Main.loadmore_people_success;
+
+        people_menu.hide();
+        sub_view_btns.removeClass('selected');
+        $('.people_view_people_btn').addClass('selected');
+        view.clear();
+        view.load();
+
+        return false;
+    });
+
+    people_menu.find('.friends_menu_item').click(function () {
+        view.is_trim = false;
+        view.item_type = 'cursor';
+        view.cursor = '';
+        view.former = ui.Template.form_people;
+        view._load = ui.PeopleView.load_friend;
+        view._loadmore = ui.PeopleView.loadmore_friend;
+        view._load_success = ui.Main.load_people_success;
+        view._loadmore_success = ui.Main.loadmore_people_success;
+
+        people_menu.hide();
+        sub_view_btns.removeClass('selected');
+        $('.people_view_people_btn').addClass('selected');
+        view.clear();
+        view.load();
+        return false;
+    });
+
+    var lists_menu = toggle.find('.lists_menu');
+    toggle.find('.people_view_list_trigger').mouseleave(function () {
+        lists_menu.hide();
+    });
+
+    lists_menu.find('.user_lists_menu_item').click(function () {
         view.is_trim = false;
         view.item_type = 'cursor';
         view.cursor = '';
         view.former = ui.Template.form_list;
         view._load = ui.PeopleView.load_lists;
-        view._loadmore = ui.PeopleView.loadmore_lists;
+        view._loadmore = null;
         view._load_success = ui.Main.load_list_success;
-        view._loadmore_success = ui.Main.loadmore_list_success;
-        lists_memu.hide();
+        view._loadmore_success = null;
+        lists_menu.hide();
         sub_view_btns.removeClass('selected');
         $('.people_view_list_btn').addClass('selected');
         view.clear();
@@ -156,16 +233,16 @@ function init_view(view) {
         return false;
     });
 
-    lists_memu.find('.listed_lists_menu_item').click(function () {
+    lists_menu.find('.listed_lists_menu_item').click(function () {
         view.is_trim = false;
         view.item_type = 'cursor';
         view.cursor = '';
         view.former = ui.Template.form_list;
         view._load = ui.PeopleView.load_listed_lists;
         view._loadmore = ui.PeopleView.loadmore_listed_lists;
-        view._load_success = ui.Main.load_list_success;
-        view._loadmore_success = ui.Main.loadmore_list_success;
-        lists_memu.hide();
+        view._load_success = ui.Main.load_listed_list_success;
+        view._loadmore_success = ui.Main.loadmore_listed_list_success;
+        lists_menu.hide();
         sub_view_btns.removeClass('selected');
         $('.people_view_list_btn').addClass('selected');
         view.clear();
@@ -173,13 +250,20 @@ function init_view(view) {
         return false;
     });
     
-    lists_memu.find('.create_list_menu_item').click(function () {
-        ui.ListAttrDlg.load(globals.myself.screen_name,'', '', 'public');
+    lists_menu.find('.create_list_menu_item').click(function () {
+        ui.ListAttrDlg.load(globals.myself.screen_name,'');
         globals.list_attr_dialog.open(); 
-        lists_memu.hide();
+        lists_menu.hide();
         return false;
     });
-    
+
+    view._header.find('.expand').click(function () {
+        if (vcard.is(':hidden')) {
+            vcard.slideDown('fast');
+        } else {
+            vcard.slideUp('fast');
+        }
+    });
 },
     
 destroy_view:
@@ -188,6 +272,7 @@ function destroy_view(view) {
     var vcard = view._header.find('.people_vcard');
     vcard.find('.button').unbind();
     vcard.find('.radio_group_btn').unbind();
+    view._header.find('expand').unbind();
     // remove slide, view and DOM
     ui.Slider.remove(view.name);
 },
@@ -200,7 +285,7 @@ function switch_sub_view(view, name) {
         view.item_type = 'id';
         view.since_id = 1;
         view.former = ui.Template.form_tweet;
-        view._load = ui.PeopleView.load_timeline;
+        view._load = ui.PeopleView.load_timeline_full;
         view._loadmore = ui.PeopleView.loadmore_timeline;
         view._load_success = ui.Main.load_tweet_success;
         view._loadmore_success = ui.Main.loadmore_tweet_success;
@@ -215,26 +300,6 @@ function switch_sub_view(view, name) {
         view._load_success = ui.Main.load_tweet_success;
         view._loadmore_success = ui.Main.loadmore_tweet_success;
     break;
-    case 'friend':
-        view.is_trim = false;
-        view.item_type = 'cursor';
-        view.cursor = '';
-        view.former = ui.Template.form_people;
-        view._load = ui.PeopleView.load_friend;
-        view._loadmore = ui.PeopleView.loadmore_friend;
-        view._load_success = ui.Main.load_people_success;
-        view._loadmore_success = ui.Main.loadmore_people_success;
-    break;
-    case 'follower':
-        view.is_trim = false;
-        view.item_type = 'cursor';
-        view.cursor = '';
-        view.former = ui.Template.form_people;
-        view._load = ui.PeopleView.load_follower;
-        view._loadmore = ui.PeopleView.loadmore_follower;
-        view._load_success = ui.Main.load_people_success;
-        view._loadmore_success = ui.Main.loadmore_people_success;
-    break;
     default: break;
     }
     view.clear();
@@ -246,7 +311,7 @@ function get_relationship(screen_name, callback) {
     if (screen_name == globals.myself.screen_name) {
         callback(0);
     } else {
-        lib.twitterapi.show_friendships(
+        globals.twitterClient.show_friendships(
               screen_name
             , globals.myself.screen_name
             , function (result) {
@@ -301,7 +366,7 @@ function render_people_view(self, user_obj, proc) {
                     + user_obj.screen_name);
             self.protected_user = true;
         } else {
-            btn_follow.text(_("Follow"));
+            btn_follow.text(_("follow"));
             btn_follow.removeClass('unfo');
             proc();
             self.protected_user = false;
@@ -316,23 +381,27 @@ function render_people_view(self, user_obj, proc) {
                 ui.PeopleView.relation_icon_set[rel]
             );
             if (rel == 1 || rel == 3) {
-                btn_follow.text(_("Unfollow"));
+                btn_follow.text(_("unfollow"));
                 btn_follow.addClass('unfo');
+                btn_follow.removeClass('blue');
+            } else {
+                btn_follow.addClass('blue');
             }
     });
+    ui.Slider.set_icon(self.name, user_obj.profile_image_url, ui.Slider.BOARD_ICON);
 },
 
-load_timeline:
-function load_timeline(view, success, fail) {
+load_timeline_full:
+function load_timeline_full(view, success, fail) {
     var render_proc = function (user_obj) {
-        ui.Slider.set_icon(view.name, user_obj.profile_image_url);
         ui.PeopleView.render_people_view(view, user_obj 
             , function () {
-                lib.twitterapi.get_user_timeline(null, view.screen_name
-                    , null, null, conf.vars.items_per_request, success);
+                globals.twitterClient.get_user_timeline(null, view.screen_name
+                    , view.since_id, null, conf.vars.items_per_request, success);
             });
+        view._load = ui.PeopleView.load_timeline;
     }
-    lib.twitterapi.show_user(view.screen_name, render_proc,
+    globals.twitterClient.show_user(view.screen_name, render_proc,
         function (xhr, textStatus, errorThrown) {
             if (xhr.status == 404) {
                 widget.DialogManager.alert('This person does not exist.'
@@ -342,13 +411,19 @@ function load_timeline(view, success, fail) {
     });
 },
 
+load_timeline:
+function load_timeline(view, success, fail) {
+    globals.twitterClient.get_user_timeline(null, view.screen_name
+        , view.since_id, null, conf.vars.items_per_request, success);
+},
+
 loadmore_timeline:
 function loadmore_people(self, success, fail) {
     if (self.protected_user) {
         self._footer.hide();
         return;
     }
-    lib.twitterapi.get_user_timeline(null
+    globals.twitterClient.get_user_timeline(null
         , self.screen_name
         , null 
         , self.max_id, 20, success);
@@ -356,52 +431,47 @@ function loadmore_people(self, success, fail) {
 
 load_fav:
 function load_fav(view, success, fail) {
-    lib.twitterapi.get_favorites(view.screen_name, 1, success);
+    globals.twitterClient.get_favorites(view.screen_name, 1, success);
 },
 
 loadmore_fav:
 function loadmore_fav(view, success, fail) {
-    lib.twitterapi.get_favorites(view.screen_name, view.page, success);
+    globals.twitterClient.get_favorites(view.screen_name, view.page, success);
 },
 
 load_follower:
 function load_follower(view, success, fail) {
-    lib.twitterapi.get_user_followers(view.screen_name, -1, success);
+    globals.twitterClient.get_user_followers(view.screen_name, -1, success);
 },
 
 loadmore_follower:
 function loadmore_follower(view, success, fail) {
-    lib.twitterapi.get_user_followers(view.screen_name, view.cursor, success);
+    globals.twitterClient.get_user_followers(view.screen_name, view.cursor, success);
 },
 
 load_friend:
 function load_friend(view, success, fail) {
-    lib.twitterapi.get_user_friends(view.screen_name, -1, success);
+    globals.twitterClient.get_user_friends(view.screen_name, -1, success);
 },
 
 loadmore_friend:
 function loadmore_friend(view, success, fail) {
-    lib.twitterapi.get_user_friends(view.screen_name, view.cursor, success);
+    globals.twitterClient.get_user_friends(view.screen_name, view.cursor, success);
 },
 
 load_lists:
 function load_lists(view, success, fail) {
-    lib.twitterapi.get_user_lists(view.screen_name, -1, success);
-},
-
-loadmore_lists:
-function loadmore_lists(view, success, fail) {
-    lib.twitterapi.get_user_lists(view.screen_name, view.cursor, success);
+    globals.twitterClient.get_user_lists(view.screen_name, -1, success);
 },
 
 load_listed_lists:
 function load_listed_lists(view, success, fail) {
-    lib.twitterapi.get_user_listed_lists(view.screen_name, -1, success);
+    globals.twitterClient.get_user_listed_lists(view.screen_name, -1, success);
 },
 
 loadmore_listed_lists:
 function loadmore_listed_lists(view, success, fail) {
-    lib.twitterapi.get_user_listed_lists(view.screen_name, view.cursor, success);
-},
+    globals.twitterClient.get_user_listed_lists(view.screen_name, view.cursor, success);
+}
 
 };

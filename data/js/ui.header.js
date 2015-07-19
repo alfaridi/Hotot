@@ -23,12 +23,6 @@ function init () {
         ui.Header.closeHototMenu();
     });
 
-    $('#exts_menu_empty_hint').click(
-    function (event) {
-        ui.ExtsDlg.load_ext_list();
-        globals.exts_dialog.open();
-    });
-
     $('#btn_reload').click(
     function(event) {
         daemon.update_all();
@@ -40,16 +34,10 @@ function init () {
         ui.PrefsDlg.load_prefs();
         globals.prefs_dialog.open();
     });
-     
-    $('#btn_exts').click(
-    function (event) {
-        ui.ExtsDlg.load_ext_list();
-        globals.exts_dialog.open();
-    });
     
     $('#btn_kismet').click(
     function (event) {
-        ui.KismetDlg.load();
+        ui.KismetDlg.reload();
         globals.kismet_dialog.open();
     });
 
@@ -63,7 +51,7 @@ function init () {
         ui.Slider.save_state();
         conf.save_prefs(conf.current_name, function() {
             for (var k in ui.Main.views) {
-                ui.Slider.remove(ui.Main.views[k].name);
+                ui.Slider.remove(ui.Main.views[k].name, true);
             }
             globals.layout.close('north');
             globals.layout.close('south');
@@ -90,12 +78,10 @@ function closeHototMenu() {
 
 closeAll:
 function closeAll() {
-    ui.Slider.closeViewSettingMenu();
     ui.Slider.closeSliderMenu();
     ui.Header.closeHototMenu();
     ui.Main.closeTweetMoreMenu();
-    ui.StatusBox.close();
-},
+}
 
 };
 

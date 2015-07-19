@@ -13,16 +13,15 @@ function init () {
         if (pin_code == '') 
             return
         toast.set("Authorizing ... ").show();
-        jsOAuth.get_access_token(pin_code,
+        globals.twitterClient.oauth.get_access_token(pin_code,
         function (result) {
             toast.set("Authentication OK!").show();
             // get a new access_token, dump it to disk.
-            conf.save_token(conf.current_name, jsOAuth.access_token);
+            conf.save_token(conf.current_name, globals.twitterClient.oauth.access_token);
             // change to main view
             globals.oauth_dialog.close();
             $('#profile_avatar_list a.selected').click();
-            ui.Welcome.btn_oauth_sign_in.set_sensitive(true);
-            ui.Welcome.btn_oauth_sign_in.click();
+            ui.Welcome.go.click();
         },
         function (xhr, textStatus, errorThrown) {
             globals.oauth_dialog.close();
@@ -32,6 +31,7 @@ function init () {
 
     $('#btn_oauth_pin_cancel').click(
     function (event) {
+        ui.Welcome.go.removeClass('loading');
         globals.oauth_dialog.close();
     });
 
@@ -53,14 +53,13 @@ function hide () {
 show:
 function show () {
     globals.oauth_dialog.open();
-    return this;
 },
 
 set_auth_url:
 function set_auth_url(url) {
     $('#btn_oauth_user_auth').attr('href', url);
     $('#tbox_oauth_auth_url').attr('value', url);
-},
+}
 
 }
 
